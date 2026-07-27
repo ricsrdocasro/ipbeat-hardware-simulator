@@ -4,10 +4,12 @@ This repository contains the firmware, analysis scripts, and raw data supporting
 
 # Repository Contents: 
 Firmware: This folder contains only the src directory with the C++ source code and the platformio.ini configuration file for the ESP32-S3 hardware simulator. The project is specifically designed for a CYD (Cheap Yellow Display) ESP32 board, and the firmware manages the 1000 Hz acquisition loop and the optimized BLE transmission stack.
+
 Raw Data: Captured CSV logs of continuous streaming trials. Note: These logs were captured using a custom cross-platform frontend interface that is not included in this repository.
+
 Data Scripts: Python scripts utilized to calculate network metrics (packet loss, jitter) and mathematically evaluate signal fidelity (cross-correlation and Root Mean Square Error) between the original digital source and the transmitted BLE payloads. 
 
-## Steps to Reproduce:
+# Steps to Reproduce:
 
 # Part 1: Hardware Setup & Transmission
 Open the Firmware directory using an IDE equipped with the PlatformIO extension (such as VS Code).
