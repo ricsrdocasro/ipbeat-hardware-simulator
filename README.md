@@ -13,12 +13,18 @@ Data Scripts: Python scripts utilized to calculate network metrics (packet loss,
 
 # Part 1: Hardware Setup & Transmission
 Open the Firmware directory using an IDE equipped with the PlatformIO extension (such as VS Code).
-Do not modify the build environment; the included platformio.ini file already contains all specific board configurations, library dependencies, and build flags required for the CYD ESP32-S3 board used in this architecture.  
-Build and flash the RTOS firmware onto the CYD ESP32 microcontroller.  
-Once running, the hardware simulator will automatically begin looping pre-recorded synthetic ECG signals (based on the PhysioNet dataset).  
+
+Do not modify the build environment; the included platformio.ini file already contains all specific board configurations, library dependencies, and build flags required for the CYD ESP32-S3 board used in this architecture.
+
+Build and flash the RTOS firmware onto the CYD ESP32 microcontroller.
+
+Once running, the hardware simulator will automatically begin looping pre-recorded synthetic ECG signals (based on the PhysioNet dataset).
+
 To capture live data, connect to the ESP32-S3 via a BLE-compatible receiver script or application capable of handling the 15 ms polling interval and 512-byte MTU limits.
 
 # Part 2: Data Analysis & Fidelity Verification
-Navigate to the Raw Data folder to access the pre-captured baseline (USB) and experimental (BLE) transmission logs.  
+Navigate to the Raw Data folder to access the pre-captured baseline (USB) and experimental (BLE) transmission logs.
+
 Run the provided Python scripts in the Data Scripts folder against these raw logs.
-The scripts will perform temporal alignment via mathematical cross-correlation and output the Root Mean Square Error (RMSE) for both physical and virtual leads, replicating the results (RMSE < 3 µV) presented in the associated manuscript. 
+
+The scripts will perform temporal alignment via mathematical cross-correlation and output the Root Mean Square Error (RMSE) for both physical and virtual leads, replicating the results (RMSE < 3 µV) presented in the associated manuscript.
