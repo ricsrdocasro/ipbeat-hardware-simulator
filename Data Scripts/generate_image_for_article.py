@@ -11,7 +11,7 @@ df_ble = pd.read_csv('IPBeat_Raw_Bluetooth_405_Batch.csv')
 flutter_ble_II = df_ble['Lead II (uV)'].values
 
 # Load USB data
-df_usb = pd.read_csv('IPBeat_Raw_USB_405_Batch.csv')
+df_usb = pd.read_csv('IPBeat_Raw_USB.csv')
 flutter_usb_II = df_usb['Lead II (uV)'].values
 
 # =============================================================================
@@ -60,18 +60,20 @@ def alinhar_e_calcular_erro(sinal_flutter, sinal_c):
     f_final = f_align[:min_len]
     c_final = c_align[:min_len]
     
-    # Calculate RMSE
+    # Calculate RMSE and CVRMSE
     rmse = np.sqrt(np.mean((f_final - c_final)**2))
+    mean_c = np.mean(c_final)
+    cvrmse = (rmse / np.abs(mean_c)) * 100 if mean_c != 0 else float('inf')
     
-    return f_final, c_final, lag, rmse
+    return f_final, c_final, lag, rmse, cvrmse
 
 # Process alignment for both USB and BLE
-f_usb_align, c_usb_align, lag_usb, rmse_usb = alinhar_e_calcular_erro(flutter_usb_II, c_II)
-f_ble_align, c_ble_align, lag_ble, rmse_ble = alinhar_e_calcular_erro(flutter_ble_II, c_II)
+f_usb_align, c_usb_align, lag_usb, rmse_usb, cvrmse_usb = alinhar_e_calcular_erro(flutter_usb_II, c_II)
+f_ble_align, c_ble_align, lag_ble, rmse_ble, cvrmse_ble = alinhar_e_calcular_erro(flutter_ble_II, c_II)
 
 print(f"--- LEAD II SYNCHRONIZATION REPORT ---")
-print(f"USB: {lag_usb} samples lag | RMSE: {rmse_usb:.4f} µV")
-print(f"BLE: {lag_ble} samples lag | RMSE: {rmse_ble:.4f} µV")
+print(f"USB: {lag_usb} samples lag | RMSE: {rmse_usb:.4f} µV | CVRMSE: {cvrmse_usb:.2f}%")
+print(f"BLE: {lag_ble} samples lag | RMSE: {rmse_ble:.4f} µV | CVRMSE: {cvrmse_ble:.2f}%")
 
 # =============================================================================
 # 4. PLOT SIDE-BY-SIDE (1 Row, 2 Columns) - HIGH CONTRAST FOR PUBLICATION
@@ -79,19 +81,17 @@ print(f"BLE: {lag_ble} samples lag | RMSE: {rmse_ble:.4f} µV")
 fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(16, 6))
 fig.suptitle("IPBeat Transmission Integrity Comparison: Lead II (USB vs. Bluetooth)", fontsize=16, fontweight='bold')
 
-# High contrast colors for perfect overlap (low RMSE)
-color_original = 'black'        # Neutral shadow
-color_usb = '#009E73'           # Colorblind-friendly Green (strong)
-color_ble = '#D55E00'           # Colorblind-friendly Orange/Red (strong)
+# Cores de alto contraste para sobreposição perfeita (RMSE baixo)
+color_original = 'black'        # Sombra neutra
+color_usb = '#009E73'           # Verde Colorblind-friendly (forte)
+color_ble = '#D55E00'           # Laranja/Vermelho Colorblind-friendly (forte)
 
 # --- GRAPH 1: USB ---
 ax1 = axes[0]
-# Original signal as a 'shadow' (thick and semi-transparent)
 ax1.plot(c_usb_align, label='Original (Flash C++)', color=color_original, alpha=0.25, linewidth=4.5)
-# Received signal cutting over (thin, dashed and opaque)
 ax1.plot(f_usb_align, label='Received via USB', color=color_usb, linestyle='--', alpha=1.0, linewidth=1.5)
 
-ax1.set_title(f"USB Transmission | RMSE: {rmse_usb:.4f} µV", fontsize=14, fontweight='bold', loc='left')
+ax1.set_title(f"USB Transmission | RMSE: {rmse_usb:.4f} µV | CVRMSE: {cvrmse_usb:.2f}%", fontsize=14, fontweight='bold', loc='left')
 ax1.grid(True, linestyle=':', alpha=0.6)
 ax1.set_xlabel('Samples (Time)', fontsize=12)
 ax1.set_ylabel('Amplitude (µV)', fontsize=12)
@@ -99,12 +99,10 @@ ax1.legend(loc='upper right', fontsize=11)
 
 # --- GRAPH 2: BLUETOOTH ---
 ax2 = axes[1]
-# Original signal as a 'shadow' (thick and semi-transparent)
 ax2.plot(c_ble_align, label='Original (Flash C++)', color=color_original, alpha=0.25, linewidth=4.5)
-# Received signal cutting over (thin, dashed and opaque)
 ax2.plot(f_ble_align, label='Received via Bluetooth', color=color_ble, linestyle='--', alpha=1.0, linewidth=1.5)
 
-ax2.set_title(f"Bluetooth Transmission | RMSE: {rmse_ble:.4f} µV", fontsize=14, fontweight='bold', loc='left')
+ax2.set_title(f"Bluetooth Transmission | RMSE: {rmse_ble:.4f} µV | CVRMSE: {cvrmse_ble:.2f}%", fontsize=14, fontweight='bold', loc='left')
 ax2.grid(True, linestyle=':', alpha=0.6)
 ax2.set_xlabel('Samples (Time)', fontsize=12)
 ax2.legend(loc='upper right', fontsize=11)
@@ -113,9 +111,9 @@ ax2.legend(loc='upper right', fontsize=11)
 plt.tight_layout()
 fig.subplots_adjust(top=0.88) # Space for the global title
 
-# Save the high-resolution image
-filename = 'Validation_Lead_II_USB_vs_BLE_HighContrast.png'
-plt.savefig(filename, dpi=300, bbox_inches='tight')
+# Save the high-resolution vector image in SVG format
+filename = 'Validation_Lead_II_USB_vs_BLE_HighContrast.svg'
+plt.savefig(filename, format='svg', bbox_inches='tight')
 
-print(f"\nPlot generated successfully! The image '{filename}' has been saved for the paper.")
+print(f"\nPlot generated successfully! The vector image '{filename}' has been saved for the paper.")
 plt.show()

@@ -23,8 +23,13 @@ Once running, the hardware simulator will automatically begin looping pre-record
 To capture live data, connect to the ESP32-S3 via a BLE-compatible receiver script or application capable of handling the 15 ms polling interval and 512-byte MTU limits.
 
 # Part 2: Data Analysis & Fidelity Verification
+
 Navigate to the Raw Data folder to access the pre-captured baseline (USB) and experimental (BLE) transmission logs.
 
-Run the provided Python scripts in the Data Scripts folder against these raw logs.
+Run the provided Python evaluation script in the Data Scripts folder against these raw logs.
 
-The scripts will perform temporal alignment via mathematical cross-correlation and output the Root Mean Square Error (RMSE) for both physical and virtual leads, replicating the results (RMSE < 3 µV) presented in the associated manuscript.
+The script automatically preprocesses the data (trimming the initial 500 samples of the USB baseline to bypass partial QRS truncation) before performing precise temporal alignment via mathematical cross-correlation.
+
+Upon alignment, the script calculates the Root Mean Square Error (RMSE), the Coefficient of Variation of the RMSE (CVRMSE), and the Normalized RMSE (NRMSE) for both physical and mathematically derived virtual leads.
+
+The script outputs the results as a tab-separated table, replicating the findings presented in the associated manuscript (maximum RMSE < 3 µV and NRMSE < 0.25% across all channels).

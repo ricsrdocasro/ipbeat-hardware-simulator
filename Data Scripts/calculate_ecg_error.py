@@ -1,27 +1,18 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import re
 
 # =============================================================================
 # 1. LOAD FLUTTER DATA (CSV)
 # =============================================================================
-csv_file = 'IPBeat_Raw_Bluetooth_405_Batch.csv'
-df_csv = pd.read_csv(csv_file)
+# Trim the first 500 samples to skip the initial partial QRS complex (ONLY FOR USB)
+trim_start_usb = 500 
 
-# Extract the CSV columns (already in microvolts)
-flutter_I   = df_csv['Lead I (uV)'].values
-flutter_II  = df_csv['Lead II (uV)'].values
-flutter_III = df_csv['Lead III (uV)'].values
-flutter_aVR = df_csv['aVR (uV)'].values
-flutter_aVL = df_csv['aVL (uV)'].values
-flutter_aVF = df_csv['aVF (uV)'].values
-flutter_V1  = df_csv['V1 (uV)'].values
-flutter_V2  = df_csv['V2 (uV)'].values
-flutter_V3  = df_csv['V3 (uV)'].values
-flutter_V4  = df_csv['V4 (uV)'].values
-flutter_V5  = df_csv['V5 (uV)'].values
-flutter_V6  = df_csv['V6 (uV)'].values
+csv_usb = 'IPBeat_Raw_USB_405_Batch.csv'
+csv_ble = 'IPBeat_Raw_Bluetooth_405_Batch.csv'
+
+df_usb = pd.read_csv(csv_usb)
+df_ble = pd.read_csv(csv_ble)
 
 # =============================================================================
 # 2. LOAD ESP32 DATA (.h) AND EXTRACT ARRAYS
@@ -31,7 +22,6 @@ with open(h_file, 'r') as f:
     h_content = f.read()
 
 def extrair_array(nome_lead):
-    # Searches the .h file for the specific array (e.g., ecg_lead_i)
     padrao = rf'const int16_t PROGMEM ecg_lead_{nome_lead}\[\] = {{([^}}]+)}};'
     match = re.search(padrao, h_content)
     if match:
@@ -39,7 +29,6 @@ def extrair_array(nome_lead):
         return np.array([int(val.strip()) for val in str_array if val.strip()], dtype=np.float64)
     return None
 
-# Get the 8 physical channels actually transmitted by the ESP32
 c_I  = extrair_array('i')
 c_II = extrair_array('ii')
 c_V1 = extrair_array('v1')
@@ -50,129 +39,110 @@ c_V5 = extrair_array('v5')
 c_V6 = extrair_array('v6')
 
 # =============================================================================
-# 3. THE KEY INSIGHT: VIRTUAL MATH RECREATION
+# 3. RECREATE VIRTUAL MATHEMATICS
 # =============================================================================
-# Instead of taking Lead III from PhysioNet, we calculate the "Expected" Lead III
-# using the exact same integer math logic applied in the Flutter frontend
 c_III = c_II - c_I
 c_aVR = -np.floor((c_I + c_II) / 2)
 c_aVL = c_I - np.floor(c_II / 2)
 c_aVF = c_II - np.floor(c_I / 2)
 
 # =============================================================================
-# 4. TIME ALIGNMENT (Cross-Correlation on Lead II)
+# 4. TIME ALIGNMENT (Calculate Lag via Lead II)
 # =============================================================================
-N = min(len(flutter_II), len(c_II))
+# Trim USB Lead II, but leave BLE Lead II intact
+usb_II = df_usb['Lead II (uV)'].values[trim_start_usb:]
+ble_II = df_ble['Lead II (uV)'].values
 
-# Finds the exact time delay from the moment the REC button was pressed
-correlation = np.correlate(flutter_II[:N] - np.mean(flutter_II[:N]), 
-                           c_II[:N] - np.mean(c_II[:N]), mode='full')
-lag = correlation.argmax() - (len(c_II[:N]) - 1)
+def find_lag(f_data, c_data):
+    N = min(len(f_data), len(c_data))
+    correlation = np.correlate(f_data[:N] - np.mean(f_data[:N]), 
+                               c_data[:N] - np.mean(c_data[:N]), mode='full')
+    return correlation.argmax() - (len(c_data[:N]) - 1)
 
-def alinhar(sinal_flutter, sinal_c):
+lag_usb = find_lag(usb_II, c_II)
+lag_ble = find_lag(ble_II, c_II)
+
+def apply_lag(f_data, c_data, lag):
     if lag > 0:
-        f_align = sinal_flutter[lag:]
-        c_align = sinal_c[:-lag]
+        f_align = f_data[lag:]
+        c_align = c_data[:-lag]
     elif lag < 0:
-        f_align = sinal_flutter[:lag]
-        c_align = sinal_c[-lag:]
+        f_align = f_data[:lag]
+        c_align = c_data[-lag:]
     else:
-        f_align = sinal_flutter
-        c_align = sinal_c
-        
+        f_align = f_data
+        c_align = c_data
     min_len = min(len(f_align), len(c_align))
     return f_align[:min_len], c_align[:min_len]
 
-# Align all leads
-f_I, c_I     = alinhar(flutter_I, c_I)
-f_II, c_II   = alinhar(flutter_II, c_II)
-f_III, c_III = alinhar(flutter_III, c_III)
-f_aVR, c_aVR = alinhar(flutter_aVR, c_aVR)
-f_aVL, c_aVL = alinhar(flutter_aVL, c_aVL)
-f_aVF, c_aVF = alinhar(flutter_aVF, c_aVF)
-f_V1, c_V1   = alinhar(flutter_V1, c_V1)
-f_V2, c_V2 = alinhar(flutter_V2, c_V2)
-f_V3, c_V3 = alinhar(flutter_V3, c_V3)
-f_V4, c_V4 = alinhar(flutter_V4, c_V4)
-f_V5, c_V5 = alinhar(flutter_V5, c_V5)
-f_V6, c_V6 = alinhar(flutter_V6, c_V6)
+# =============================================================================
+# 5. METRICS CALCULATION
+# =============================================================================
+def calc_metrics(f_data, c_data):
+    rmse = np.sqrt(np.mean((f_data - c_data)**2))
+    
+    mean_c = np.mean(c_data)
+    cvrmse = (rmse / np.abs(mean_c)) * 100 if mean_c != 0 else float('inf')
+    
+    range_c = np.max(c_data) - np.min(c_data)
+    nrmse = (rmse / range_c) * 100 if range_c != 0 else float('inf')
+    
+    return rmse, cvrmse, nrmse
 
 # =============================================================================
-# 5. ERROR CALCULATION (RMSE)
+# 6. PROCESS LEADS AND GENERATE COMPACT TABLE FOR WORD
 # =============================================================================
-def calc_rmse(f_data, c_data):
-    return np.sqrt(np.mean((f_data - c_data)**2))
-
-# Complete Validation Report
-print(f"--- IPBEAT VALIDATION REPORT (12 LEADS) ---")
-print(f"Synchronization delay: {lag} samples")
-print(f"\n--- PHYSICAL CHANNELS (Direct Transmission) ---")
-print(f"RMSE Lead I:  {calc_rmse(f_I, c_I):.4f} µV")
-print(f"RMSE Lead II: {calc_rmse(f_II, c_II):.4f} µV")
-print(f"RMSE V1:      {calc_rmse(f_V1, c_V1):.4f} µV")
-print(f"RMSE V2:      {calc_rmse(f_V2, c_V2):.4f} µV")
-print(f"RMSE V3:      {calc_rmse(f_V3, c_V3):.4f} µV")
-print(f"RMSE V4:      {calc_rmse(f_V4, c_V4):.4f} µV")
-print(f"RMSE V5:      {calc_rmse(f_V5, c_V5):.4f} µV")
-print(f"RMSE V6:      {calc_rmse(f_V6, c_V6):.4f} µV")
-
-print(f"\n--- VIRTUAL CHANNELS (Flutter Math) ---")
-print(f"RMSE Lead III:{calc_rmse(f_III, c_III):.4f} µV")
-print(f"RMSE aVR:     {calc_rmse(f_aVR, c_aVR):.4f} µV")
-print(f"RMSE aVL:     {calc_rmse(f_aVL, c_aVL):.4f} µV")
-print(f"RMSE aVF:     {calc_rmse(f_aVF, c_aVF):.4f} µV")
-
-# =============================================================================
-# 6. COMPLETE VALIDATION PLOT (CLINICAL STANDARD 6x2 GRID)
-# =============================================================================
-# Organizing data in the classic visual order (Left Column vs Right Column)
-plot_config = [
-    # Column 1 (Limb Leads)      # Column 2 (Precordial Leads)
-    ('Lead I', f_I, c_I),        ('V1', f_V1, c_V1),
-    ('Lead II', f_II, c_II),     ('V2', f_V2, c_V2),
-    ('Lead III', f_III, c_III),  ('V3', f_V3, c_V3),
-    ('aVR', f_aVR, c_aVR),       ('V4', f_V4, c_V4),
-    ('aVL', f_aVL, c_aVL),       ('V5', f_V5, c_V5),
-    ('aVF', f_aVF, c_aVF),       ('V6', f_V6, c_V6)
+leads_config = [
+    ('DI', 'Lead I (uV)', c_I, 'Physical'),
+    ('DII', 'Lead II (uV)', c_II, 'Physical'),
+    ('DIII', 'Lead III (uV)', c_III, 'Virtual'),
+    ('aVR', 'aVR (uV)', c_aVR, 'Virtual'),
+    ('aVL', 'aVL (uV)', c_aVL, 'Virtual'),
+    ('aVF', 'aVF (uV)', c_aVF, 'Virtual'),
+    ('V1', 'V1 (uV)', c_V1, 'Physical'),
+    ('V2', 'V2 (uV)', c_V2, 'Physical'),
+    ('V3', 'V3 (uV)', c_V3, 'Physical'),
+    ('V4', 'V4 (uV)', c_V4, 'Physical'),
+    ('V5', 'V5 (uV)', c_V5, 'Physical'),
+    ('V6', 'V6 (uV)', c_V6, 'Physical')
 ]
 
-# Creates the figure with a large size (ideal for exporting to the document)
-fig, axes = plt.subplots(nrows=6, ncols=2, figsize=(16, 20))
-fig.suptitle("IPBeat Transmission Validation: Original Signal vs. Received (Bluetooth)", fontsize=18, fontweight='bold')
+table_data = []
 
-# Flattens the 6x2 array of plots for easy looping (indices 0 to 11)
-axes = axes.flatten()
-
-for i, (title, f_data, c_data) in enumerate(plot_config):
-    ax = axes[i]
+for lead_name, col_name, c_data, lead_type in leads_config:
+    # Process USB (Trimmed)
+    f_usb_raw = df_usb[col_name].values[trim_start_usb:]
+    f_usb, c_usb_align = apply_lag(f_usb_raw, c_data, lag_usb)
+    rmse_u, cvrmse_u, nrmse_u = calc_metrics(f_usb, c_usb_align)
     
-    # Calculates the specific error to put in the subplot title
-    rmse_val = calc_rmse(f_data, c_data)
+    # Process BLE (Untrimmed)
+    f_ble_raw = df_ble[col_name].values
+    f_ble, c_ble_align = apply_lag(f_ble_raw, c_data, lag_ble)
+    rmse_b, cvrmse_b, nrmse_b = calc_metrics(f_ble, c_ble_align)
     
-    # Draws the Expected signal (Thick blue) and the Received signal (Thin dashed red)
-    ax.plot(c_data, label='Original (C++)', color='#1f77b4', alpha=0.8, linewidth=2.5)
-    ax.plot(f_data, label='IPBeat (Flutter)', color='#d62728', linestyle='--', alpha=1.0, linewidth=1.5)
-    
-    # Subplot formatting
-    ax.set_title(f"{title} | RMSE: {rmse_val:.4f} µV", fontsize=12, fontweight='bold', loc='left')
-    ax.grid(True, linestyle=':', alpha=0.6)
-    
-    # Removes X-axis labels on the top plots to avoid visual clutter
-    if i < 10:
-        ax.set_xticklabels([])
-    else:
-        ax.set_xlabel('Samples (Time)', fontsize=10)
-        
-    # Places the legend only on the first plot to save space
-    if i == 0:
-        ax.legend(loc='upper right', fontsize=10)
+    # Append Compact Row (All metrics on one line)
+    table_data.append({
+        "Lead": lead_name,
+        "Type": lead_type,
+        "RMSE USB (µV)": f"{rmse_u:.4f}",
+        "CVRMSE / NRMSE USB (%)": f"{cvrmse_u:.2f} / {nrmse_u:.2f}",
+        "RMSE BLE (µV)": f"{rmse_b:.4f}",
+        "CVRMSE / NRMSE BLE (%)": f"{cvrmse_b:.2f} / {nrmse_b:.2f}"
+    })
 
-# Adjusts spacing to prevent overlap
-plt.tight_layout()
-fig.subplots_adjust(top=0.95) # Leaves space for the main title
+# Convert to a Pandas DataFrame
+df_results = pd.DataFrame(table_data)
 
-# Saves the image automatically in high resolution!
-plt.savefig('Validation_12_Leads_IPBeat.png', dpi=300, bbox_inches='tight')
+print("--- TAB-SEPARATED TABLE (COPY THE TEXT BELOW) ---\n")
+print(df_results.to_csv(sep='\t', index=False))
 
-print("\nPlot generated successfully! The image 'Validation_12_Leads_IPBeat.png' was saved in the folder.")
-plt.show()
+print("\n--- SYNCHRONIZATION INFO ---")
+print(f"USB Lag Applied: {lag_usb} samples (after {trim_start_usb} sample trim)")
+print(f"BLE Lag Applied: {lag_ble} samples (no initial trim)")
+
+# MAGIC TRICK: Attempt to copy directly to your computer's clipboard!
+try:
+    df_results.to_clipboard(index=False)
+    print("\n[SUCCESS] Table automatically copied to your clipboard! Try pressing Ctrl+V in Word right now.")
+except Exception as e:
+    pass
